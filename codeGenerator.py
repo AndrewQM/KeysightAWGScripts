@@ -5,14 +5,27 @@ import matplotlib.pyplot as plt
 import math
 import csv
 import random
+import yaml
+import json
+
+
 
 # Cast bytes to bytearray
 mutable_bytes = bytearray(b'\x00\x0F')
-
+print(mutable_bytes[1])
 # Bytearray allows modification
-mutable_bytes[0] = 255
-mutable_bytes.append(255)
+
+mutable_bytes[0] = 125
+mutable_bytes.append(32)
+mutable_bytes.append(44)
+
+
 print(mutable_bytes)
+print(mutable_bytes[0])
+print(mutable_bytes[1])
+print(mutable_bytes[2])
+print(mutable_bytes[3])
+
 
 # Cast bytearray back to bytes
 immutable_bytes = bytes(mutable_bytes)
@@ -23,36 +36,38 @@ print(immutable_bytes)
 #pulse time, cycles, rep rate, etc.
 
 
-
+clockgen = True
 
 
 #AWG params
-sampleRate = 90 #Gsps
-MAXsampleDepth = 512 #KSamples
+sampleRate = 92.2375 #Gsps
+MAXsampleDepth = 256 #KSamples. Memory limit of AWG
 
 #System params
-laserRate = 5 #GHz
-amplitude = .7
-activeTime = 12 #ns
+laserRate = 4.7 #GHz
+amplitude = 1
+activeTime = 120 #ns
 
-MAXtcspcCycleRate = 8 #MHz
+MAXtcspcCycleRate = 4.6 #MHz
 
-filesave = False
+filesave = True
 
 
 
 
 sampleTime = 1/(sampleRate*1e9)
 laserTime = 1/(laserRate*1e9)
-hightime = laserTime*.1
+hightime = laserTime*.30
 
 
-sigma = laserTime*.2
+sigma = laserTime*.15
 MINcycleTime = 1/(MAXtcspcCycleRate*1e6)
 MINsamples_per_cycle = ((sampleRate*1e9)//(MAXtcspcCycleRate*1e6)) - 1
 
 
-F = Fraction(int(laserRate*100), int(sampleRate*100))
+F = Fraction(int(laserRate*1000000), int(sampleRate*1000000))
+
+
 mult = (MINsamples_per_cycle)//F.denominator
 cycleDepth = (mult + 1)*F.denominator
 cycleTime = cycleDepth*sampleTime
@@ -167,7 +182,7 @@ class datagen():
                 else:
                     break
 
-            for i in range(0, bandleft):
+            for i in range(0, bandleft,1):
                 if cyclecapacity > 0:
                     self.prob[i] = self.prob[i] + 1
                     cyclecapacity = cyclecapacity - 1
@@ -186,6 +201,27 @@ class datagen():
         self.datatype = "testpulse_bin_" + str(bin)
         self.prob = [0] * self.bins
         self.prob[bin] = self.total_cycles
+    '''
+    def testMultiPulse(self, bin1, bin2, bin3, bin4 ,bin5 , bin6):
+        self.datatype = "testmultipulse_bin_multi"
+        self.prob = [0] * self.bins
+        self.prob[bin1] = (self.total_cycles) // 6
+        self.prob[bin2] = (self.total_cycles) // 6
+        self.prob[bin3] = (self.total_cycles) // 6
+        self.prob[bin4] = (self.total_cycles) // 6
+        self.prob[bin5] = (self.total_cycles) // 6
+        self.prob[bin6] = self.total_cycles - 5*(self.total_cycles // 6)
+        '''
+
+    def testMultiPulse(self, pulses):
+        self.datatype = "testmultipulse_bin_multi"
+        self.prob = [0] * self.bins
+
+        for pulse_idx in range(len(pulses) - 1):
+            self.prob[pulses[pulse_idx]] = (self.total_cycles) // len(pulses) #want certain number of pulses in this bin
+
+        self.prob[pulses[-1]] = self.total_cycles - (len(pulses) - 1)*(self.total_cycles // len(pulses))
+
 
     def generatePulseSequence(self):
         # generates list of numbers that correspond to PPM slots. For example,
@@ -335,6 +371,7 @@ class PulseSequence():
         print(self.times)
 
     def genDefaultPulseObjects(self, hightime_, sigma_, amplitude_):
+        #this writes a list of pulse objects
         for i in range(len(self.pulseSequence)):
             self.pulseList.append(pulse(hightime_, sigma_, self.times[i], self.sampleTime, amplitude_))
         #print(self.pulseList)
@@ -351,7 +388,11 @@ class PulseSequence():
 
 
 data = datagen(1e-9*activeTime//laserTime, cycles_per_sequence)
-data.testPattern2()
+#data.testPattern2()
+#data.testPulse(10)
+data.testMultiPulse([10, 256, 384, 511])
+
+
 #data.testPulse(1) #for putting a single pulse in a specified slot in all cycles.
 pulseSequence = data.generatePulseSequence()
 
@@ -360,7 +401,15 @@ PulseSeq = PulseSequence(cycles_per_sequence, pulseSequence, sampleTime, 0)
 PulseSeq.generateTimesList()
 PulseSeq.genDefaultPulseObjects(hightime, sigma, amplitude)
 PulseSeq.writePulses()
-PulseSeq.plotSomePulses(3)
+PulseSeq.plotSomePulses(12)
+
+
+if clockgen:
+    clock_sequence = [0] * sequenceLength
+
+    for i in range(sequenceLength//10):
+        clock_sequence[i] = 1
+
 
 
 
@@ -381,10 +430,25 @@ if filesave:
     with open(file_name + '.csv', 'w', newline='') as f:
         writer = csv.writer(f)
         writer.writerows(zip(PulseSeq.sequence, PulseSeq.zerosequence))
+    if clockgen:
+        with open(file_name + 'CLOCK' + '.csv', 'w', newline='') as f:
+            writer = csv.writer(f)
+            writer.writerows(zip(clock_sequence, PulseSeq.zerosequence))
+
+file_name = "AWG" + "_LRate_" + str(laserRate) + "GHz" + "_SRate_" + str(
+    sampleRate) + "GHz" + "_dBins_" + str(data.bins) + "_TCycles_" + str(
+    cycles_per_sequence) + "_SLength_" + str(sequenceLength) + "_dtype_" \
+            + str(data.datatype)
+
+file_name_yaml = "AWG" + "_LRate_" + str(laserRate) + "GHz" + "_SRate_" + str(
+    sampleRate) + '.yaml'
 
 
+users = [{"LaserRate": laserRate, 'laserTime': laserTime, 'dBins': data.bins, 'CyclesPerSequence': cycles_per_sequence, 'Pulses per Cycle': pulses_per_cycle},
+         {"pulses": pulseSequence}]
 
-
+with open(file_name_yaml, 'w') as f:
+    data = yaml.dump(users, f)
 
 
 
